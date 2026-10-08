@@ -1,14 +1,14 @@
 <?php
 
-namespace Paimis\RedisReadCache;
+namespace KybDev\RedisReadCache;
 
 use Illuminate\Database\Connection;
 use Illuminate\Support\ServiceProvider;
-use Paimis\RedisReadCache\Database\RedisReadThroughMySqlConnection;
-use Paimis\RedisReadCache\Database\RedisReadThroughPostgresConnection;
-use Paimis\RedisReadCache\Database\RedisReadThroughSqlServerConnection;
-use Paimis\RedisReadCache\Database\RedisReadThroughSqliteConnection;
-use Paimis\RedisReadCache\Services\RedisReadCacheService;
+use KybDev\RedisReadCache\Database\RedisReadThroughMySqlConnection;
+use KybDev\RedisReadCache\Database\RedisReadThroughPostgresConnection;
+use KybDev\RedisReadCache\Database\RedisReadThroughSqlServerConnection;
+use KybDev\RedisReadCache\Database\RedisReadThroughSqliteConnection;
+use KybDev\RedisReadCache\Services\RedisReadCacheService;
 
 class RedisReadCacheServiceProvider extends ServiceProvider
 {

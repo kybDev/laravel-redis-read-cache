@@ -1,11 +1,11 @@
 <?php
 
-namespace Paimis\RedisReadCache\Console\Commands;
+namespace KybDev\RedisReadCache\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Paimis\RedisReadCache\Services\RedisReadCacheService;
+use KybDev\RedisReadCache\Services\RedisReadCacheService;
 
 class RedisHotRunnerCommand extends Command
 {

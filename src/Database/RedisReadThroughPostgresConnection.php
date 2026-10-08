@@ -1,9 +1,9 @@
 <?php
 
-namespace Paimis\RedisReadCache\Database;
+namespace KybDev\RedisReadCache\Database;
 
 use Illuminate\Database\PostgresConnection;
-use Paimis\RedisReadCache\Database\Concerns\InteractsWithRedisReadCache;
+use KybDev\RedisReadCache\Database\Concerns\InteractsWithRedisReadCache;
 
 class RedisReadThroughPostgresConnection extends PostgresConnection
 {

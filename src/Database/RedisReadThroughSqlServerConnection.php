@@ -1,9 +1,9 @@
 <?php
 
-namespace Paimis\RedisReadCache\Database;
+namespace KybDev\RedisReadCache\Database;
 
 use Illuminate\Database\SqlServerConnection;
-use Paimis\RedisReadCache\Database\Concerns\InteractsWithRedisReadCache;
+use KybDev\RedisReadCache\Database\Concerns\InteractsWithRedisReadCache;
 
 class RedisReadThroughSqlServerConnection extends SqlServerConnection
 {

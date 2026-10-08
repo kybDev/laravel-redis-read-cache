@@ -1,6 +1,6 @@
 <?php
 
-namespace Paimis\RedisReadCache\Services;
+namespace KybDev\RedisReadCache\Services;
 
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Support\Facades\Log;
@@ -119,7 +119,7 @@ class RedisReadCacheService
 
     protected function cachePrefix(): string
     {
-        $prefix = trim((string) ($this->config['prefix'] ?? 'paimis_read_cache:'), ':');
+        $prefix = trim((string) ($this->config['prefix'] ?? 'redis_read_cache:'), ':');
 
         return $prefix.':';
     }

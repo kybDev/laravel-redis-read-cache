@@ -1,8 +1,8 @@
 <?php
 
-namespace Paimis\RedisReadCache\Database\Concerns;
+namespace KybDev\RedisReadCache\Database\Concerns;
 
-use Paimis\RedisReadCache\Services\RedisReadCacheService;
+use KybDev\RedisReadCache\Services\RedisReadCacheService;
 
 trait InteractsWithRedisReadCache
 {
@@ -65,7 +65,7 @@ trait InteractsWithRedisReadCache
     {
         $result = parent::statement($query, $bindings);
 
-        $this->redisReadCache()->invalidateAll();
+        $this->invalidateRedisReadCache();
 
         return $result;
     }
@@ -74,8 +74,26 @@ trait InteractsWithRedisReadCache
     {
         $result = parent::affectingStatement($query, $bindings);
 
-        $this->redisReadCache()->invalidateAll();
+        $this->invalidateRedisReadCache();
 
         return $result;
+    }
+
+    public function unprepared($query)
+    {
+        $result = parent::unprepared($query);
+
+        $this->invalidateRedisReadCache();
+
+        return $result;
+    }
+
+    protected function invalidateRedisReadCache(): void
+    {
+        $service = $this->redisReadCache();
+
+        if ($service->enabled()) {
+            $service->invalidateAll();
+        }
     }
 }
