@@ -4,6 +4,7 @@ namespace KybDev\RedisReadCache;
 
 use Illuminate\Database\Connection;
 use Illuminate\Support\ServiceProvider;
+use KybDev\RedisReadCache\Console\Commands\RedisHotRunnerCommand;
 use KybDev\RedisReadCache\Database\RedisReadThroughMySqlConnection;
 use KybDev\RedisReadCache\Database\RedisReadThroughPostgresConnection;
 use KybDev\RedisReadCache\Database\RedisReadThroughSqlServerConnection;
@@ -27,6 +28,10 @@ class RedisReadCacheServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__.'/../config/redis-read-cache.php' => config_path('redis-read-cache.php'),
             ], 'redis-read-cache-config');
+
+            $this->commands([
+                RedisHotRunnerCommand::class,
+            ]);
         }
 
         if (! config('redis.read_cache.enabled', false)) {
