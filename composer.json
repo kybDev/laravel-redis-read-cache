@@ -1,0 +1,43 @@
+{
+    "name": "paimis/laravel-redis-read-cache",
+    "description": "Transparent Redis read-through caching for Laravel applications.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "redis",
+        "cache",
+        "read-through",
+        "database"
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^11.0",
+        "illuminate/config": "^11.0",
+        "illuminate/database": "^11.0",
+        "illuminate/support": "^11.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.13",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Paimis\\RedisReadCache\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Paimis\\RedisReadCache\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Paimis\\RedisReadCache\\RedisReadCacheServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
