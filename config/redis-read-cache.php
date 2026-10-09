@@ -12,6 +12,10 @@ return [
             'trim',
             explode(',', env('REDIS_READ_CACHE_CONTROLLER_PATHS', 'app/Http/Controllers'))
         ))),
+        'include_tables' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', env('REDIS_READ_CACHE_CONTROLLER_INCLUDE_TABLES', ''))
+        ))),
         'exclude_classes' => [
             \Illuminate\Database\Eloquent\Builder::class,
             \Illuminate\Database\Eloquent\Model::class,

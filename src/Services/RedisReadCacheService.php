@@ -33,7 +33,7 @@ class RedisReadCacheService
         return true;
     }
 
-    public function shouldCacheReadFromCaller(array $trace): bool
+    public function shouldCacheReadFromCaller(array $trace, string $query = ''): bool
     {
         if (! $this->controllerScopeEnabled()) {
             return true;
@@ -46,6 +46,7 @@ class RedisReadCacheService
         );
         $packagePath = $this->normalizePath(dirname(__DIR__, 2));
         $excludedClasses = $scope['exclude_classes'] ?? [];
+        $includedModelTable = $this->queryUsesIncludedTable($query, $scope['include_tables'] ?? []);
 
         foreach ($trace as $frame) {
             $class = $frame['class'] ?? null;
@@ -53,6 +54,7 @@ class RedisReadCacheService
             if (
                 is_string($class)
                 && $this->matchesExcludedClass($class, $excludedClasses)
+                && ! $includedModelTable
             ) {
                 return false;
             }
@@ -249,6 +251,24 @@ class RedisReadCacheService
                 && $excludedClass !== ''
                 && is_a($class, $excludedClass, true)
             ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function queryUsesIncludedTable(string $query, array $includedTables): bool
+    {
+        foreach ($includedTables as $table) {
+            if (! is_string($table) || $table === '') {
+                continue;
+            }
+
+            $identifier = '[`"\[]?'.preg_quote($table, '/').'[`"\]]?';
+            $pattern = '/\b(?:from|join)\s+(?:(?:[`"\[]?[\w$]+[`"\]]?)\s*\.\s*)?'.$identifier.'(?![\w$])/i';
+
+            if (preg_match($pattern, $query)) {
                 return true;
             }
         }

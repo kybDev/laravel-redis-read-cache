@@ -114,6 +114,39 @@ class RedisReadCacheTest extends TestCase
         ]));
     }
 
+    public function test_controller_scope_allows_eloquent_for_explicitly_included_table(): void
+    {
+        $controllerPath = sys_get_temp_dir().'/sample-app/app/Http/Controllers';
+        $service = new RedisReadCacheService(
+            $this->createMock(RedisFactory::class),
+            [
+                'controller_scope' => [
+                    'enabled' => true,
+                    'paths' => [$controllerPath],
+                    'include_tables' => ['access_controls'],
+                    'exclude_classes' => [
+                        \Illuminate\Database\Eloquent\Builder::class,
+                        \Illuminate\Database\Eloquent\Model::class,
+                    ],
+                ],
+            ]
+        );
+
+        $trace = [
+            ['class' => \Illuminate\Database\Eloquent\Builder::class, 'file' => '/project/vendor/laravel/framework/src/Illuminate/Database/Eloquent/Builder.php'],
+            ['file' => $controllerPath.'/AdminUsersController.php'],
+        ];
+
+        $this->assertTrue($service->shouldCacheReadFromCaller(
+            $trace,
+            'select top 1 * from [dbo].[access_controls] where [admin_user_id] = ?'
+        ));
+        $this->assertFalse($service->shouldCacheReadFromCaller(
+            $trace,
+            'select * from [dbo].[admin_users] where [id] = ?'
+        ));
+    }
+
     public function test_hot_runner_can_store_read_results_independently_of_caller_scope(): void
     {
         $service = new class($this->createMock(RedisFactory::class), [

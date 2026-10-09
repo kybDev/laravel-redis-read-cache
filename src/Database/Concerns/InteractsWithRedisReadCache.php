@@ -24,7 +24,8 @@ trait InteractsWithRedisReadCache
         }
 
         return $service->shouldCacheReadFromCaller(
-            debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS)
+            debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS),
+            $query
         );
     }
 
