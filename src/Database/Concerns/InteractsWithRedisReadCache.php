@@ -16,6 +16,8 @@ trait InteractsWithRedisReadCache
         $service = $this->redisReadCache();
 
         if (! $service->enabled() || ! $service->shouldCacheRead($query)) {
+            $service->recordMetric('reads_sql');
+
             return false;
         }
 
@@ -23,10 +25,16 @@ trait InteractsWithRedisReadCache
             return true;
         }
 
-        return $service->shouldCacheReadFromCaller(
+        $shouldCache = $service->shouldCacheReadFromCaller(
             debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS),
             $query
         );
+
+        if (! $shouldCache) {
+            $service->recordMetric('reads_sql');
+        }
+
+        return $shouldCache;
     }
 
     public function select($query, $bindings = [], $useReadPdo = true)
@@ -48,6 +56,7 @@ trait InteractsWithRedisReadCache
             return $cachedResult;
         }
 
+        $this->redisReadCache()->recordMetric('reads_sql');
         $result = parent::select($query, $bindings, $useReadPdo);
 
         $this->redisReadCache()->put($cacheKey, $result);

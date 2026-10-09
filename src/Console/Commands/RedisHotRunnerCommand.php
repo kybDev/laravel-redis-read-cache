@@ -34,6 +34,8 @@ class RedisHotRunnerCommand extends Command
             return self::FAILURE;
         }
 
+        $cacheService->recordMetric('warm_runs');
+
         $connection = $this->option('connection') ?: config('database.default');
         $tables = $this->option('tables');
         $limit = max(1, (int) $this->option('limit'));
@@ -47,6 +49,7 @@ class RedisHotRunnerCommand extends Command
 
         if (empty($tableNames)) {
             $this->warn('No tables were found to warm for connection ['.$connection.'].');
+            $cacheService->flushMetrics();
 
             return self::SUCCESS;
         }
@@ -87,6 +90,7 @@ class RedisHotRunnerCommand extends Command
         }
 
         $this->info('Redis hot runner completed. Warmed '.$warmed.' rows across '.count($tableNames).' table(s).');
+        $cacheService->flushMetrics();
 
         return $failed ? self::FAILURE : self::SUCCESS;
     }

@@ -14,6 +14,7 @@ use KybDev\RedisReadCache\Database\RedisReadThroughSqlServerConnection;
 use KybDev\RedisReadCache\Database\RedisReadThroughSqliteConnection;
 use KybDev\RedisReadCache\Services\RedisReadCacheService;
 use KybDev\RedisReadCache\Services\RedisReadCacheProfiler;
+use KybDev\RedisReadCache\Http\Controllers\RedisReadCacheDashboardController;
 
 class RedisReadCacheServiceProvider extends ServiceProvider
 {
@@ -28,6 +29,8 @@ class RedisReadCacheServiceProvider extends ServiceProvider
         $this->app->scoped(RedisReadCacheProfiler::class, function ($app) {
             return new RedisReadCacheProfiler($app['redis'], config('redis.read_cache.profiling', []));
         });
+
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'redis-read-cache');
     }
 
     public function boot(): void
@@ -46,11 +49,25 @@ class RedisReadCacheServiceProvider extends ServiceProvider
                 }
             });
 
+        }
+
+        if (
+            config('redis.read_cache.profiling.enabled', false)
+            || config('redis.read_cache.dashboard.enabled', false)
+        ) {
             $this->app['events']->listen(
                 'Illuminate\Foundation\Http\Events\RequestHandled',
                 function ($event): void {
-                    if (isset($event->request) && is_object($event->request)) {
+                    if (! isset($event->request) || ! is_object($event->request)) {
+                        return;
+                    }
+
+                    if (config('redis.read_cache.profiling.enabled', false)) {
                         $this->app->make(RedisReadCacheProfiler::class)->flush($event->request);
+                    }
+
+                    if (config('redis.read_cache.dashboard.enabled', false)) {
+                        $this->app->make(RedisReadCacheService::class)->flushMetrics();
                     }
                 }
             );
@@ -65,6 +82,10 @@ class RedisReadCacheServiceProvider extends ServiceProvider
                 RedisHotRunnerCommand::class,
                 RedisReadCacheProfileCommand::class,
             ]);
+        }
+
+        if (config('redis.read_cache.dashboard.enabled', false)) {
+            $this->loadRoutesFrom(__DIR__.'/../routes/dashboard.php');
         }
 
         if (! config('redis.read_cache.enabled', false)) {

@@ -14,6 +14,12 @@ class RedisReadCacheService
 
     protected array $localResults = [];
 
+    protected array $pendingMetrics = [];
+
+    protected bool $lastReadWasWarm = false;
+
+    protected const CACHE_ENTRY_MARKER = '__kybdev_redis_read_cache_entry_v1';
+
     public function __construct(
         protected RedisFactory $redis,
         protected array $config = []
@@ -108,8 +114,16 @@ class RedisReadCacheService
 
     public function get(string $key): mixed
     {
+        $this->lastReadWasWarm = false;
+
         if (isset($this->localResults[$key])) {
             if ($this->localResults[$key]['expires_at'] > microtime(true)) {
+                $this->recordMetric('reads_local');
+                $this->lastReadWasWarm = $this->localResults[$key]['warmed'];
+                if ($this->lastReadWasWarm) {
+                    $this->recordMetric('reads_after_warm');
+                }
+
                 return $this->localResults[$key]['value'];
             }
 
@@ -135,9 +149,20 @@ class RedisReadCacheService
                 return null;
             }
 
-            $this->rememberLocally($key, $unserialized, strlen((string) $cached));
+            $warmed = is_array($unserialized)
+                && ($unserialized[self::CACHE_ENTRY_MARKER] ?? null) === true
+                && ($unserialized['warmed'] ?? false) === true;
+            $value = $warmed || (is_array($unserialized) && ($unserialized[self::CACHE_ENTRY_MARKER] ?? null) === true)
+                ? $unserialized['value']
+                : $unserialized;
+            $this->lastReadWasWarm = $warmed;
+            $this->recordMetric('reads_redis');
+            if ($warmed) {
+                $this->recordMetric('reads_after_warm');
+            }
+            $this->rememberLocally($key, $value, strlen((string) $cached), $warmed);
 
-            return $unserialized;
+            return $value;
         } catch (Throwable $exception) {
             Log::warning('Redis read cache get failed.', ['key' => $key, 'exception' => $exception->getMessage()]);
 
@@ -145,7 +170,7 @@ class RedisReadCacheService
         }
     }
 
-    public function put(string $key, mixed $value): bool
+    public function put(string $key, mixed $value, bool $warmed = false): bool
     {
         $redis = $this->redisConnection();
 
@@ -154,13 +179,18 @@ class RedisReadCacheService
         }
 
         try {
-            $serialized = serialize($value);
+            $serialized = serialize([
+                self::CACHE_ENTRY_MARKER => true,
+                'warmed' => $warmed,
+                'value' => $value,
+            ]);
 
             if (! (bool) $redis->setex($key, $this->ttl(), $serialized)) {
                 return false;
             }
 
-            $this->rememberLocally($key, $value, strlen($serialized));
+            $this->localResults = [];
+            $this->rememberLocally($key, $value, strlen($serialized), $warmed);
 
             return true;
         } catch (Throwable $exception) {
@@ -175,16 +205,93 @@ class RedisReadCacheService
         string $databaseName,
         string $query,
         array $bindings,
-        array $result
+        array $result,
+        bool $warmed = true
     ): bool {
         if (! $this->enabled() || ! $this->shouldCacheRead($query)) {
             return false;
         }
 
-        return $this->put(
+        $stored = $this->put(
             $this->buildKey($connectionName, $databaseName, $query, $bindings),
-            $result
+            $result,
+            $warmed
         );
+
+        if ($stored && $warmed) {
+            $this->recordMetric('warmed_rows', count($result));
+            $this->recordMetric('warmed_tables');
+        }
+
+        return $stored;
+    }
+
+    public function lastReadWasWarm(): bool
+    {
+        return $this->lastReadWasWarm;
+    }
+
+    public function recordMetric(string $metric, int $amount = 1): void
+    {
+        if (($this->config['dashboard']['enabled'] ?? false) && $amount > 0) {
+            $this->pendingMetrics[$metric] = ($this->pendingMetrics[$metric] ?? 0) + $amount;
+        }
+    }
+
+    public function flushMetrics(): bool
+    {
+        if ($this->pendingMetrics === []) {
+            return true;
+        }
+
+        $redis = $this->redisConnection();
+
+        if ($redis === null) {
+            return false;
+        }
+
+        $metrics = $this->pendingMetrics;
+        $key = $this->metricsKey();
+        $ttl = max(60, (int) ($this->config['dashboard']['metrics_ttl'] ?? 2592000));
+
+        try {
+            $redis->pipeline(function ($pipeline) use ($metrics, $key, $ttl): void {
+                foreach ($metrics as $name => $amount) {
+                    $pipeline->hincrby($key, $name, $amount);
+                }
+                $pipeline->expire($key, $ttl);
+            });
+            $this->pendingMetrics = [];
+
+            return true;
+        } catch (Throwable $exception) {
+            Log::warning('Redis read-cache metrics flush failed.', [
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
+    public function metrics(): array
+    {
+        $redis = $this->redisConnection();
+
+        if ($redis === null) {
+            return [];
+        }
+
+        try {
+            $metrics = $redis->hgetall($this->metricsKey());
+
+            return is_array($metrics) ? $metrics : [];
+        } catch (Throwable $exception) {
+            Log::warning('Redis read-cache metrics read failed.', [
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
     }
 
     public function redisAvailable(): bool
@@ -249,7 +356,7 @@ class RedisReadCacheService
         return max(1, (int) ($this->config['ttl'] ?? 300));
     }
 
-    protected function rememberLocally(string $key, mixed $value, int $serializedSize): void
+    protected function rememberLocally(string $key, mixed $value, int $serializedSize, bool $warmed): void
     {
         if (
             $serializedSize > self::MAX_LOCAL_CACHE_VALUE_BYTES
@@ -261,7 +368,15 @@ class RedisReadCacheService
         $this->localResults[$key] = [
             'expires_at' => microtime(true) + $this->ttl(),
             'value' => $value,
+            'warmed' => $warmed,
         ];
+    }
+
+    protected function metricsKey(): string
+    {
+        $prefix = rtrim((string) ($this->config['dashboard']['metrics_prefix'] ?? 'redis_read_cache:dashboard:'), ':');
+
+        return $prefix.':metrics';
     }
 
     protected function normalizePath(string $path): string

@@ -34,4 +34,11 @@ return [
         'min_requests' => (int) env('REDIS_READ_CACHE_PROFILING_MIN_REQUESTS', 3),
         'slow_page_ms' => (float) env('REDIS_READ_CACHE_PROFILING_SLOW_PAGE_MS', 1000),
     ],
+    'dashboard' => [
+        'enabled' => env('REDIS_READ_CACHE_DASHBOARD_ENABLED', false),
+        'path' => env('REDIS_READ_CACHE_DASHBOARD_PATH', 'redis-read-cache'),
+        'middleware' => ['web', 'auth'],
+        'metrics_prefix' => env('REDIS_READ_CACHE_METRICS_PREFIX', 'redis_read_cache:dashboard:'),
+        'metrics_ttl' => (int) env('REDIS_READ_CACHE_METRICS_TTL', 2592000),
+    ],
 ];

@@ -160,7 +160,7 @@ class RedisReadCacheTest extends TestCase
         ]) extends RedisReadCacheService {
             public array $stored = [];
 
-            public function put(string $key, mixed $value): bool
+            public function put(string $key, mixed $value, bool $warmed = false): bool
             {
                 $this->stored = [$key, $value];
 
@@ -243,6 +243,77 @@ class RedisReadCacheTest extends TestCase
         $this->assertSame(str_repeat('x', 262145), $service->get($key));
         $this->assertSame(str_repeat('x', 262145), $service->get($key));
         $this->assertSame(2, $redis->getCalls);
+    }
+
+    public function test_warmed_entries_are_counted_as_redis_reads_after_warm(): void
+    {
+        $redis = new InMemoryRedisConnection;
+        $factory = $this->createMock(RedisFactory::class);
+        $factory->expects($this->any())
+            ->method('connection')
+            ->with('cache')
+            ->willReturn($redis);
+        $service = new RedisReadCacheService($factory, [
+            'enabled' => true,
+            'connection' => 'cache',
+            'prefix' => 'redis_read_cache:',
+            'ttl' => 300,
+            'dashboard' => [
+                'enabled' => true,
+                'metrics_prefix' => 'metrics_test:',
+            ],
+        ]);
+        $rows = [(object) ['id' => 1]];
+
+        $this->assertTrue($service->cacheSelectResult('sqlsrv', 'app', 'SELECT * FROM units', [], $rows));
+        $this->assertTrue($service->flushMetrics());
+        $key = $service->buildKey('sqlsrv', 'app', 'SELECT * FROM units', []);
+        $reader = new RedisReadCacheService($factory, [
+            'enabled' => true,
+            'connection' => 'cache',
+            'dashboard' => [
+                'enabled' => true,
+                'metrics_prefix' => 'metrics_test:',
+            ],
+        ]);
+        $this->assertEquals($rows, $reader->get($key));
+        $this->assertTrue($reader->lastReadWasWarm());
+        $this->assertTrue($reader->flushMetrics());
+
+        $metrics = $service->metrics();
+        $this->assertSame('1', (string) $metrics['warmed_rows']);
+        $this->assertSame('1', (string) $metrics['warmed_tables']);
+        $this->assertSame('1', (string) $metrics['reads_redis']);
+        $this->assertSame('1', (string) $metrics['reads_after_warm']);
+    }
+
+    public function test_warmed_entries_are_counted_when_reused_from_local_memory(): void
+    {
+        $redis = new InMemoryRedisConnection;
+        $factory = $this->createMock(RedisFactory::class);
+        $factory->expects($this->any())
+            ->method('connection')
+            ->with('cache')
+            ->willReturn($redis);
+        $service = new RedisReadCacheService($factory, [
+            'enabled' => true,
+            'connection' => 'cache',
+            'dashboard' => [
+                'enabled' => true,
+                'metrics_prefix' => 'metrics_local_test:',
+            ],
+        ]);
+        $rows = [(object) ['id' => 1]];
+
+        $this->assertTrue($service->cacheSelectResult('sqlsrv', 'app', 'SELECT * FROM units', [], $rows));
+        $key = $service->buildKey('sqlsrv', 'app', 'SELECT * FROM units', []);
+        $this->assertEquals($rows, $service->get($key));
+        $this->assertTrue($service->lastReadWasWarm());
+        $this->assertTrue($service->flushMetrics());
+
+        $metrics = $service->metrics();
+        $this->assertSame('1', (string) $metrics['reads_local']);
+        $this->assertSame('1', (string) $metrics['reads_after_warm']);
     }
 
     public function test_profiler_aggregates_queries_without_storing_bindings(): void

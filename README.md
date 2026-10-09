@@ -20,6 +20,7 @@ The service provider is registered through Laravel package auto-discovery.
 - Reuses repeated cached query results in request-local memory to avoid duplicate Redis round trips
 - Profiles slow pages and repeated SELECT query patterns and reports cache candidates without changing cache policy
 - Includes a warm-up command for newly provisioned servers
+- Provides an optional, access-controlled monitoring dashboard with Redis-stored counters
 
 ## Installation
 
@@ -80,6 +81,21 @@ php artisan redis:profile --limit=50
 The report ranks routes by average response time and query patterns by cumulative database time. A query is recommended only when it meets the configured minimum execution count and either the cumulative-time or per-execution slow-query threshold. A page is reported only after the minimum request count and average page-time threshold. Thresholds can be adjusted under `redis.read_cache.profiling` in the published config. Profiling only reports candidates; it never enables caching or changes the cache allowlist automatically. Review freshness, user/tenant isolation, and invalidation requirements before adding a candidate to a cache policy.
 
 Profiling adds query-event aggregation and a Redis pipeline at request completion, so sample production traffic carefully. Reduce `REDIS_READ_CACHE_PROFILING_SAMPLE_RATE` (for example `0.1`) for lower overhead. Disable profiling after collecting enough data. When profiling is enabled but Redis is unavailable, the application continues serving requests and logs a warning; `redis:profile` reports a connection failure.
+
+## Monitoring dashboard
+
+The dashboard is disabled by default and registers no route unless explicitly enabled. It stores its counters in Redis; it does not require a database migration.
+
+```env
+REDIS_READ_CACHE_DASHBOARD_ENABLED=true
+REDIS_READ_CACHE_DASHBOARD_PATH=redis-read-cache
+REDIS_READ_CACHE_METRICS_PREFIX=redis_read_cache:dashboard:
+REDIS_READ_CACHE_METRICS_TTL=2592000
+```
+
+With the default path, visit `/redis-read-cache`. The route uses Laravel's `web` and `auth` middleware by default. Configure `dashboard.middleware` in the published package config to use the authorization middleware appropriate for your application; protect this operational data and do not expose the route publicly.
+
+The dashboard reports Redis availability and feature status, retained profiler record count, and package-observed reads served by Redis, SQL, request-local memory, and entries populated by `redis:hot-runner`. A cache miss is counted as a SQL read; reads that bypass caching (including controller-scope exclusions) are also counted. “Reads after warm-up” is a subset of Redis/local reads for entries marked as populated by the hot runner. Warm-runner totals are accumulated as cache writes complete. Counters are shared through the configured Redis connection and expire after the configured metrics TTL. Since SQL counters are emitted by the read-through connection, they require `REDIS_READ_CACHE_ENABLED=true`; the dashboard itself can be enabled independently.
 
 ## Usage
 
