@@ -140,6 +140,42 @@ class RedisReadCacheService
         }
     }
 
+    public function cacheSelectResult(
+        string $connectionName,
+        string $databaseName,
+        string $query,
+        array $bindings,
+        array $result
+    ): bool {
+        if (! $this->enabled() || ! $this->shouldCacheRead($query)) {
+            return false;
+        }
+
+        return $this->put(
+            $this->buildKey($connectionName, $databaseName, $query, $bindings),
+            $result
+        );
+    }
+
+    public function redisAvailable(): bool
+    {
+        $redis = $this->redisConnection();
+
+        if ($redis === null) {
+            return false;
+        }
+
+        try {
+            $response = $redis->ping();
+
+            return $response === true || in_array(strtoupper((string) $response), ['PONG', '1'], true);
+        } catch (Throwable $exception) {
+            Log::warning('Redis read cache ping failed.', ['exception' => $exception->getMessage()]);
+
+            return false;
+        }
+    }
+
     public function invalidateAll(): void
     {
         $redis = $this->redisConnection();

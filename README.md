@@ -66,6 +66,8 @@ php artisan redis:hot-runner
 php artisan redis:hot-runner --tables=units,systems --limit=500 --force
 ```
 
+The warm-up command explicitly writes its fetched `SELECT` results to Redis, so it works even when controller-only caching is enabled. It first checks Redis connectivity and exits with a failure status if Redis or any cache write fails.
+
 ## Packagist
 
 This package is designed to be publishable to Packagist later as:

@@ -113,4 +113,33 @@ class RedisReadCacheTest extends TestCase
             ['file' => $controllerPath.'/UnitController.php'],
         ]));
     }
+
+    public function test_hot_runner_can_store_read_results_independently_of_caller_scope(): void
+    {
+        $service = new class($this->createMock(RedisFactory::class), [
+            'enabled' => true,
+            'controller_scope' => ['enabled' => true],
+        ]) extends RedisReadCacheService {
+            public array $stored = [];
+
+            public function put(string $key, mixed $value): bool
+            {
+                $this->stored = [$key, $value];
+
+                return true;
+            }
+        };
+
+        $rows = [(object) ['id' => 1]];
+
+        $this->assertTrue($service->cacheSelectResult(
+            'sqlsrv',
+            'test_database',
+            'SELECT TOP 500 * FROM units',
+            [],
+            $rows
+        ));
+        $this->assertSame($rows, $service->stored[1]);
+        $this->assertStringStartsWith('redis_read_cache:', $service->stored[0]);
+    }
 }

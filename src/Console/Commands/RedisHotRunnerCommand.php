@@ -28,6 +28,12 @@ class RedisHotRunnerCommand extends Command
             return self::FAILURE;
         }
 
+        if (! $cacheService->redisAvailable()) {
+            $this->error('Redis is unavailable; no tables were warmed.');
+
+            return self::FAILURE;
+        }
+
         $connection = $this->option('connection') ?: config('database.default');
         $tables = $this->option('tables');
         $limit = max(1, (int) $this->option('limit'));
@@ -48,25 +54,41 @@ class RedisHotRunnerCommand extends Command
         $this->info('Warming Redis read cache for ['.$connection.'] using '.count($tableNames).' table(s).');
 
         $warmed = 0;
+        $failed = false;
 
         foreach ($tableNames as $table) {
             try {
                 $this->line(' - warming '.$table.' (limit '.$limit.')');
 
-                $rows = DB::connection($connection)
-                    ->table($table)
-                    ->limit($limit)
-                    ->get();
+                $database = DB::connection($connection);
+                $query = $database->table($table)->limit($limit);
+                $sql = $query->toSql();
+                $bindings = $query->getBindings();
+                $rows = $database->select($sql, $bindings);
 
-                $warmed += $rows->count();
+                if (! $cacheService->cacheSelectResult(
+                    $database->getName(),
+                    $database->getDatabaseName(),
+                    $sql,
+                    $bindings,
+                    $rows
+                )) {
+                    $this->error('Failed to cache table ['.$table.']. Check Redis connectivity and cache configuration.');
+                    $failed = true;
+
+                    continue;
+                }
+
+                $warmed += count($rows);
             } catch (\Throwable $exception) {
                 $this->warn('Skipped table ['.$table.']: '.$exception->getMessage());
+                $failed = true;
             }
         }
 
         $this->info('Redis hot runner completed. Warmed '.$warmed.' rows across '.count($tableNames).' table(s).');
 
-        return self::SUCCESS;
+        return $failed ? self::FAILURE : self::SUCCESS;
     }
 
     protected function resolveTableNames(string $connection, array $tables): array
