@@ -16,6 +16,7 @@ The service provider is registered through Laravel package auto-discovery.
 - Environment-controlled activation via `REDIS_READ_CACHE_ENABLED`
 - Uses the configured Laravel Redis connection
 - Falls back safely to normal database reads when Redis is unavailable
+- Optionally limits caching to direct query-builder reads in configured controller directories
 - Includes a warm-up command for newly provisioned servers
 
 ## Installation
@@ -38,6 +39,15 @@ REDIS_READ_CACHE_CONNECTION=cache
 REDIS_READ_CACHE_TTL=300
 REDIS_READ_CACHE_PREFIX=redis_read_cache:
 ```
+
+To cache only direct `DB::table()` or query-builder reads executed in controller files, enable the controller scope:
+
+```env
+REDIS_READ_CACHE_CONTROLLER_SCOPE=true
+REDIS_READ_CACHE_CONTROLLER_PATHS=app/Http/Controllers
+```
+
+You can provide multiple comma-separated directories. When this scope is enabled, Eloquent model queries and reads whose first application caller is outside those directories (such as services or repositories) bypass the cache. The package inspects the PHP call stack for scoped reads, which adds some overhead; leave the scope disabled if transparent caching of all eligible `SELECT` statements is preferred.
 
 ## Usage
 

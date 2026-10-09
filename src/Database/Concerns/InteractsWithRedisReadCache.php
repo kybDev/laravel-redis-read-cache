@@ -15,7 +15,17 @@ trait InteractsWithRedisReadCache
     {
         $service = $this->redisReadCache();
 
-        return $service->enabled() && $service->shouldCacheRead($query);
+        if (! $service->enabled() || ! $service->shouldCacheRead($query)) {
+            return false;
+        }
+
+        if (! $service->controllerScopeEnabled()) {
+            return true;
+        }
+
+        return $service->shouldCacheReadFromCaller(
+            debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS)
+        );
     }
 
     public function select($query, $bindings = [], $useReadPdo = true)

@@ -53,4 +53,56 @@ class RedisReadCacheTest extends TestCase
         $this->assertFalse($service->shouldCacheRead('UPDATE units SET active = 0'));
         $this->assertFalse($service->shouldCacheRead('SELECT * INTO OUTFILE "/tmp/units.csv" FROM units'));
     }
+
+    public function test_controller_scope_is_disabled_by_default(): void
+    {
+        $service = new RedisReadCacheService($this->createMock(RedisFactory::class));
+
+        $this->assertTrue($service->shouldCacheReadFromCaller([
+            ['file' => '/app/Services/UnitService.php'],
+        ]));
+    }
+
+    public function test_controller_scope_allows_direct_controller_queries(): void
+    {
+        $controllerPath = sys_get_temp_dir().'/sample-app/app/Http/Controllers';
+        $service = new RedisReadCacheService(
+            $this->createMock(RedisFactory::class),
+            [
+                'controller_scope' => [
+                    'enabled' => true,
+                    'paths' => [$controllerPath],
+                ],
+            ]
+        );
+
+        $this->assertTrue($service->shouldCacheReadFromCaller([
+            ['file' => '/project/vendor/laravel/framework/src/Illuminate/Database/Connection.php'],
+            ['file' => $controllerPath.'/UnitController.php'],
+        ]));
+    }
+
+    public function test_controller_scope_rejects_service_and_eloquent_reads(): void
+    {
+        $controllerPath = sys_get_temp_dir().'/sample-app/app/Http/Controllers';
+        $service = new RedisReadCacheService(
+            $this->createMock(RedisFactory::class),
+            [
+                'controller_scope' => [
+                    'enabled' => true,
+                    'paths' => [$controllerPath],
+                ],
+            ]
+        );
+
+        $this->assertFalse($service->shouldCacheReadFromCaller([
+            ['file' => '/project/app/Services/UnitService.php'],
+            ['file' => $controllerPath.'/UnitController.php'],
+        ]));
+
+        $this->assertFalse($service->shouldCacheReadFromCaller([
+            ['class' => \Illuminate\Database\Eloquent\Builder::class],
+            ['file' => $controllerPath.'/UnitController.php'],
+        ]));
+    }
 }

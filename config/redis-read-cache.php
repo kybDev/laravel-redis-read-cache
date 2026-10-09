@@ -6,4 +6,11 @@ return [
     'ttl' => (int) env('REDIS_READ_CACHE_TTL', 300),
     'prefix' => env('REDIS_READ_CACHE_PREFIX', 'redis_read_cache:'),
     'drivers' => array_values(array_filter(array_map('trim', explode(',', env('REDIS_READ_CACHE_DRIVERS', 'sqlsrv,mysql,pgsql,sqlite'))))),
+    'controller_scope' => [
+        'enabled' => env('REDIS_READ_CACHE_CONTROLLER_SCOPE', false),
+        'paths' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', env('REDIS_READ_CACHE_CONTROLLER_PATHS', 'app/Http/Controllers'))
+        ))),
+    ],
 ];

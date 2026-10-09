@@ -33,6 +33,61 @@ class RedisReadCacheService
         return true;
     }
 
+    public function shouldCacheReadFromCaller(array $trace): bool
+    {
+        if (! $this->controllerScopeEnabled()) {
+            return true;
+        }
+
+        $scope = $this->config['controller_scope'] ?? [];
+        $controllerPaths = array_map(
+            fn (string $path): string => $this->normalizePath($path),
+            $scope['paths'] ?? []
+        );
+        $packagePath = $this->normalizePath(dirname(__DIR__, 2));
+
+        foreach ($trace as $frame) {
+            $class = $frame['class'] ?? null;
+
+            if (
+                is_string($class)
+                && (
+                    is_a($class, \Illuminate\Database\Eloquent\Builder::class, true)
+                    || is_a($class, \Illuminate\Database\Eloquent\Model::class, true)
+                )
+            ) {
+                return false;
+            }
+
+            $file = $frame['file'] ?? null;
+
+            if (! is_string($file) || $file === '') {
+                continue;
+            }
+
+            $file = $this->normalizePath($file);
+
+            if ($this->isWithinPath($file, $packagePath) || $this->isVendorPath($file)) {
+                continue;
+            }
+
+            foreach ($controllerPaths as $controllerPath) {
+                if ($this->isWithinPath($file, $controllerPath)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return false;
+    }
+
+    public function controllerScopeEnabled(): bool
+    {
+        return (bool) ($this->config['controller_scope']['enabled'] ?? false);
+    }
+
     public function buildKey(string $connectionName, string $databaseName, string $query, array $bindings = []): string
     {
         $payload = [
@@ -127,5 +182,28 @@ class RedisReadCacheService
     protected function ttl(): int
     {
         return max(1, (int) ($this->config['ttl'] ?? 300));
+    }
+
+    protected function normalizePath(string $path): string
+    {
+        $path = str_replace('\\', '/', $path);
+
+        if (! preg_match('/^(?:[A-Za-z]:\/|\/)/', $path)) {
+            $path = getcwd().'/'.$path;
+        }
+
+        $path = rtrim($path, '/');
+
+        return PHP_OS_FAMILY === 'Windows' ? strtolower($path) : $path;
+    }
+
+    protected function isWithinPath(string $path, string $directory): bool
+    {
+        return $path === $directory || str_starts_with($path, $directory.'/');
+    }
+
+    protected function isVendorPath(string $path): bool
+    {
+        return str_contains($path, '/vendor/');
     }
 }
