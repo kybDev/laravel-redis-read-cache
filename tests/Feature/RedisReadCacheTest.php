@@ -3,6 +3,7 @@
 namespace KybDev\RedisReadCache\Tests\Feature;
 
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
+use Illuminate\Contracts\Redis\Connection as RedisConnection;
 use KybDev\RedisReadCache\Services\RedisReadCacheService;
 use PHPUnit\Framework\TestCase;
 
@@ -174,5 +175,119 @@ class RedisReadCacheTest extends TestCase
         ));
         $this->assertSame($rows, $service->stored[1]);
         $this->assertStringStartsWith('redis_read_cache:', $service->stored[0]);
+    }
+
+    public function test_repeated_reads_use_request_local_result_after_first_redis_read(): void
+    {
+        $redis = new InMemoryRedisConnection;
+        $key = 'redis_read_cache:test';
+        $rows = [(object) ['id' => 1]];
+        $redis->values[$key] = serialize($rows);
+
+        $factory = $this->createMock(RedisFactory::class);
+        $factory->expects($this->any())
+            ->method('connection')
+            ->with('cache')
+            ->willReturn($redis);
+
+        $service = new RedisReadCacheService($factory, ['connection' => 'cache']);
+
+        $this->assertEquals($rows, $service->get($key));
+        $this->assertEquals($rows, $service->get($key));
+        $this->assertSame(1, $redis->getCalls);
+
+        $nextRequest = new RedisReadCacheService($factory, ['connection' => 'cache']);
+        $this->assertEquals($rows, $nextRequest->get($key));
+        $this->assertSame(2, $redis->getCalls);
+    }
+
+    public function test_write_invalidation_clears_request_local_results(): void
+    {
+        $redis = new InMemoryRedisConnection;
+        $key = 'redis_read_cache:test';
+        $redis->values[$key] = serialize([(object) ['id' => 1]]);
+
+        $factory = $this->createMock(RedisFactory::class);
+        $factory->expects($this->any())
+            ->method('connection')
+            ->with('cache')
+            ->willReturn($redis);
+
+        $service = new RedisReadCacheService($factory, ['connection' => 'cache']);
+        $service->get($key);
+        $service->invalidateAll();
+        $service->get($key);
+
+        $this->assertSame(2, $redis->getCalls);
+        $this->assertArrayNotHasKey($key, $redis->values);
+    }
+
+    public function test_large_results_are_not_retained_in_request_local_cache(): void
+    {
+        $redis = new InMemoryRedisConnection;
+        $key = 'redis_read_cache:large';
+        $redis->values[$key] = serialize(str_repeat('x', 262145));
+
+        $factory = $this->createMock(RedisFactory::class);
+        $factory->expects($this->any())
+            ->method('connection')
+            ->with('cache')
+            ->willReturn($redis);
+
+        $service = new RedisReadCacheService($factory, ['connection' => 'cache']);
+
+        $this->assertSame(str_repeat('x', 262145), $service->get($key));
+        $this->assertSame(str_repeat('x', 262145), $service->get($key));
+        $this->assertSame(2, $redis->getCalls);
+    }
+}
+
+class InMemoryRedisConnection implements RedisConnection
+{
+    public array $values = [];
+
+    public int $getCalls = 0;
+
+    public function subscribe($channels, \Closure $callback): void {}
+
+    public function psubscribe($channels, \Closure $callback): void {}
+
+    public function command($method, array $parameters = []): mixed
+    {
+        if ($method === 'get') {
+            $this->getCalls++;
+
+            return $this->values[$parameters[0]] ?? false;
+        }
+
+        if ($method === 'setex') {
+            $this->values[$parameters[0]] = $parameters[2];
+
+            return true;
+        }
+
+        if ($method === 'keys') {
+            $prefix = rtrim($parameters[0], '*');
+
+            return array_values(array_filter(
+                array_keys($this->values),
+                fn (string $key): bool => str_starts_with($key, $prefix)
+            ));
+        }
+
+        if ($method === 'del') {
+            foreach ((array) $parameters[0] as $key) {
+                unset($this->values[$key]);
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    public function __call(string $method, array $parameters): mixed
+    {
+        return $this->command($method, $parameters);
     }
 }

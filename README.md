@@ -17,6 +17,7 @@ The service provider is registered through Laravel package auto-discovery.
 - Uses the configured Laravel Redis connection
 - Falls back safely to normal database reads when Redis is unavailable
 - Optionally limits caching to direct query-builder reads in configured controller directories
+- Reuses repeated cached query results in request-local memory to avoid duplicate Redis round trips
 - Includes a warm-up command for newly provisioned servers
 
 ## Installation
@@ -54,6 +55,8 @@ REDIS_READ_CACHE_CONTROLLER_INCLUDE_TABLES=access_controls
 ```
 
 Multiple table names may be supplied as a comma-separated list. Only queries originating in the configured controller directories and referencing an included table in a `FROM` or `JOIN` clause bypass the default Eloquent exclusion. You can also customize the `controller_scope.exclude_classes` array in the published config. The package inspects the PHP call stack for scoped reads, which adds some overhead; leave the scope disabled if transparent caching of all eligible `SELECT` statements is preferred.
+
+Repeated identical queries within one Laravel request/job reuse a request-scoped in-memory result after the first Redis lookup. This avoids Redis round trips for duplicate reads in the same lifecycle; the first read still pays Redis lookup and deserialization costs. Local reuse is bounded to 64 entries of up to 256 KiB each to avoid retaining unbounded result sets in memory. Cache writes clear the local results. The service uses Laravel's scoped lifetime so this in-memory optimization does not leak results between requests in long-running workers.
 
 ## Usage
 

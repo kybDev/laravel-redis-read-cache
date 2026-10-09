@@ -17,7 +17,7 @@ class RedisReadCacheServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/redis-read-cache.php', 'redis.read_cache');
 
-        $this->app->singleton(RedisReadCacheService::class, function ($app) {
+        $this->app->scoped(RedisReadCacheService::class, function ($app) {
             return new RedisReadCacheService($app['redis'], config('redis.read_cache', []));
         });
     }

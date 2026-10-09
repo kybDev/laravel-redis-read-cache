@@ -8,6 +8,12 @@ use Throwable;
 
 class RedisReadCacheService
 {
+    protected const MAX_LOCAL_CACHE_ENTRIES = 64;
+
+    protected const MAX_LOCAL_CACHE_VALUE_BYTES = 262144;
+
+    protected array $localResults = [];
+
     public function __construct(
         protected RedisFactory $redis,
         protected array $config = []
@@ -102,6 +108,14 @@ class RedisReadCacheService
 
     public function get(string $key): mixed
     {
+        if (isset($this->localResults[$key])) {
+            if ($this->localResults[$key]['expires_at'] > microtime(true)) {
+                return $this->localResults[$key]['value'];
+            }
+
+            unset($this->localResults[$key]);
+        }
+
         $redis = $this->redisConnection();
 
         if ($redis === null) {
@@ -117,7 +131,13 @@ class RedisReadCacheService
 
             $unserialized = @unserialize((string) $cached);
 
-            return $unserialized === false ? null : $unserialized;
+            if ($unserialized === false) {
+                return null;
+            }
+
+            $this->rememberLocally($key, $unserialized, strlen((string) $cached));
+
+            return $unserialized;
         } catch (Throwable $exception) {
             Log::warning('Redis read cache get failed.', ['key' => $key, 'exception' => $exception->getMessage()]);
 
@@ -134,7 +154,15 @@ class RedisReadCacheService
         }
 
         try {
-            return (bool) $redis->setex($key, $this->ttl(), serialize($value));
+            $serialized = serialize($value);
+
+            if (! (bool) $redis->setex($key, $this->ttl(), $serialized)) {
+                return false;
+            }
+
+            $this->rememberLocally($key, $value, strlen($serialized));
+
+            return true;
         } catch (Throwable $exception) {
             Log::warning('Redis read cache put failed.', ['key' => $key, 'exception' => $exception->getMessage()]);
 
@@ -180,6 +208,7 @@ class RedisReadCacheService
 
     public function invalidateAll(): void
     {
+        $this->localResults = [];
         $redis = $this->redisConnection();
 
         if ($redis === null) {
@@ -218,6 +247,21 @@ class RedisReadCacheService
     protected function ttl(): int
     {
         return max(1, (int) ($this->config['ttl'] ?? 300));
+    }
+
+    protected function rememberLocally(string $key, mixed $value, int $serializedSize): void
+    {
+        if (
+            $serializedSize > self::MAX_LOCAL_CACHE_VALUE_BYTES
+            || (count($this->localResults) >= self::MAX_LOCAL_CACHE_ENTRIES && ! array_key_exists($key, $this->localResults))
+        ) {
+            return;
+        }
+
+        $this->localResults[$key] = [
+            'expires_at' => microtime(true) + $this->ttl(),
+            'value' => $value,
+        ];
     }
 
     protected function normalizePath(string $path): string
