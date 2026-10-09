@@ -12,5 +12,9 @@ return [
             'trim',
             explode(',', env('REDIS_READ_CACHE_CONTROLLER_PATHS', 'app/Http/Controllers'))
         ))),
+        'exclude_classes' => [
+            \Illuminate\Database\Eloquent\Builder::class,
+            \Illuminate\Database\Eloquent\Model::class,
+        ],
     ],
 ];

@@ -72,6 +72,10 @@ class RedisReadCacheTest extends TestCase
                 'controller_scope' => [
                     'enabled' => true,
                     'paths' => [$controllerPath],
+                    'exclude_classes' => [
+                        \Illuminate\Database\Eloquent\Builder::class,
+                        \Illuminate\Database\Eloquent\Model::class,
+                    ],
                 ],
             ]
         );
@@ -91,6 +95,10 @@ class RedisReadCacheTest extends TestCase
                 'controller_scope' => [
                     'enabled' => true,
                     'paths' => [$controllerPath],
+                    'exclude_classes' => [
+                        \Illuminate\Database\Eloquent\Builder::class,
+                        \Illuminate\Database\Eloquent\Model::class,
+                    ],
                 ],
             ]
         );

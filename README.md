@@ -47,7 +47,7 @@ REDIS_READ_CACHE_CONTROLLER_SCOPE=true
 REDIS_READ_CACHE_CONTROLLER_PATHS=app/Http/Controllers
 ```
 
-You can provide multiple comma-separated directories. When this scope is enabled, Eloquent model queries and reads whose first application caller is outside those directories (such as services or repositories) bypass the cache. The package inspects the PHP call stack for scoped reads, which adds some overhead; leave the scope disabled if transparent caching of all eligible `SELECT` statements is preferred.
+You can provide multiple comma-separated directories. When this scope is enabled, Eloquent model queries and reads whose first application caller is outside those directories (such as services or repositories) bypass the cache. Eloquent builders/models are excluded by default; customize the `controller_scope.exclude_classes` array in the published `config/redis-read-cache.php` to exclude additional classes or model base classes. The package inspects the PHP call stack for scoped reads, which adds some overhead; leave the scope disabled if transparent caching of all eligible `SELECT` statements is preferred.
 
 ## Usage
 

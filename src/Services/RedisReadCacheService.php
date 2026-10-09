@@ -45,16 +45,14 @@ class RedisReadCacheService
             $scope['paths'] ?? []
         );
         $packagePath = $this->normalizePath(dirname(__DIR__, 2));
+        $excludedClasses = $scope['exclude_classes'] ?? [];
 
         foreach ($trace as $frame) {
             $class = $frame['class'] ?? null;
 
             if (
                 is_string($class)
-                && (
-                    is_a($class, \Illuminate\Database\Eloquent\Builder::class, true)
-                    || is_a($class, \Illuminate\Database\Eloquent\Model::class, true)
-                )
+                && $this->matchesExcludedClass($class, $excludedClasses)
             ) {
                 return false;
             }
@@ -205,5 +203,20 @@ class RedisReadCacheService
     protected function isVendorPath(string $path): bool
     {
         return str_contains($path, '/vendor/');
+    }
+
+    protected function matchesExcludedClass(string $class, array $excludedClasses): bool
+    {
+        foreach ($excludedClasses as $excludedClass) {
+            if (
+                is_string($excludedClass)
+                && $excludedClass !== ''
+                && is_a($class, $excludedClass, true)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
