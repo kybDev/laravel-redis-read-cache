@@ -18,6 +18,7 @@ The service provider is registered through Laravel package auto-discovery.
 - Falls back safely to normal database reads when Redis is unavailable
 - Optionally limits caching to direct query-builder reads in configured controller directories
 - Reuses repeated cached query results in request-local memory to avoid duplicate Redis round trips
+- Profiles slow pages and repeated SELECT query patterns and reports cache candidates without changing cache policy
 - Includes a warm-up command for newly provisioned servers
 
 ## Installation
@@ -57,6 +58,28 @@ REDIS_READ_CACHE_CONTROLLER_INCLUDE_TABLES=access_controls
 Multiple table names may be supplied as a comma-separated list. Only queries originating in the configured controller directories and referencing an included table in a `FROM` or `JOIN` clause bypass the default Eloquent exclusion. You can also customize the `controller_scope.exclude_classes` array in the published config. The package inspects the PHP call stack for scoped reads, which adds some overhead; leave the scope disabled if transparent caching of all eligible `SELECT` statements is preferred.
 
 Repeated identical queries within one Laravel request/job reuse a request-scoped in-memory result after the first Redis lookup. This avoids Redis round trips for duplicate reads in the same lifecycle; the first read still pays Redis lookup and deserialization costs. Local reuse is bounded to 64 entries of up to 256 KiB each to avoid retaining unbounded result sets in memory. Cache writes clear the local results. The service uses Laravel's scoped lifetime so this in-memory optimization does not leak results between requests in long-running workers.
+
+## Profiling and cache recommendations
+
+Profiling is opt-in and independent of `REDIS_READ_CACHE_ENABLED`. It records route duration and SELECT query counts/durations to the configured Redis connection. It stores normalized SQL shapes only: binding values and quoted/numeric literal values are not included. Profiling data is retained for seven days by default.
+
+```env
+REDIS_READ_CACHE_PROFILING_ENABLED=true
+REDIS_READ_CACHE_PROFILING_CONNECTION=cache
+REDIS_READ_CACHE_PROFILING_TTL=604800
+REDIS_READ_CACHE_PROFILING_SAMPLE_RATE=1
+```
+
+For a clean database baseline, temporarily disable read-through caching while profiling. Cached hits do not dispatch database query events, so profiling while caching is active observes database misses, not the reads already served by Redis. Collect representative traffic, then review recommendations:
+
+```bash
+php artisan redis:profile
+php artisan redis:profile --limit=50
+```
+
+The report ranks routes by average response time and query patterns by cumulative database time. A query is recommended only when it meets the configured minimum execution count and either the cumulative-time or per-execution slow-query threshold. A page is reported only after the minimum request count and average page-time threshold. Thresholds can be adjusted under `redis.read_cache.profiling` in the published config. Profiling only reports candidates; it never enables caching or changes the cache allowlist automatically. Review freshness, user/tenant isolation, and invalidation requirements before adding a candidate to a cache policy.
+
+Profiling adds query-event aggregation and a Redis pipeline at request completion, so sample production traffic carefully. Reduce `REDIS_READ_CACHE_PROFILING_SAMPLE_RATE` (for example `0.1`) for lower overhead. Disable profiling after collecting enough data. When profiling is enabled but Redis is unavailable, the application continues serving requests and logs a warning; `redis:profile` reports a connection failure.
 
 ## Usage
 

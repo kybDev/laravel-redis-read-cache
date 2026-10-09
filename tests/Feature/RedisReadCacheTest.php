@@ -4,7 +4,10 @@ namespace KybDev\RedisReadCache\Tests\Feature;
 
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Redis\Connection as RedisConnection;
+use Illuminate\Database\Connection;
+use Illuminate\Database\Events\QueryExecuted;
 use KybDev\RedisReadCache\Services\RedisReadCacheService;
+use KybDev\RedisReadCache\Services\RedisReadCacheProfiler;
 use PHPUnit\Framework\TestCase;
 
 class RedisReadCacheTest extends TestCase
@@ -14,6 +17,7 @@ class RedisReadCacheTest extends TestCase
         $classes = [
             \KybDev\RedisReadCache\RedisReadCacheServiceProvider::class,
             \KybDev\RedisReadCache\Console\Commands\RedisHotRunnerCommand::class,
+            \KybDev\RedisReadCache\Console\Commands\RedisReadCacheProfileCommand::class,
             \KybDev\RedisReadCache\Database\RedisReadThroughMySqlConnection::class,
             \KybDev\RedisReadCache\Database\RedisReadThroughPostgresConnection::class,
             \KybDev\RedisReadCache\Database\RedisReadThroughSqlServerConnection::class,
@@ -240,6 +244,75 @@ class RedisReadCacheTest extends TestCase
         $this->assertSame(str_repeat('x', 262145), $service->get($key));
         $this->assertSame(2, $redis->getCalls);
     }
+
+    public function test_profiler_aggregates_queries_without_storing_bindings(): void
+    {
+        $redis = new InMemoryRedisConnection;
+        $factory = $this->createMock(RedisFactory::class);
+        $factory->expects($this->any())
+            ->method('connection')
+            ->with('cache')
+            ->willReturn($redis);
+
+        $connection = $this->createMock(Connection::class);
+        $connection->method('getDatabaseName')->willReturn('app_database');
+        $profiler = new RedisReadCacheProfiler($factory, [
+            'enabled' => true,
+            'connection' => 'cache',
+            'prefix' => 'profile_test:',
+            'ttl' => 3600,
+            'slow_page_ms' => 1000,
+        ]);
+        $sql = "select * from users where email = ? and id = ?";
+
+        $profiler->record(new QueryExecuted($sql, ['private@example.com', 42], 25.5, $connection), 'users.index');
+        $profiler->record(new QueryExecuted($sql, ['another@example.com', 43], 14.5, $connection), 'users.index');
+        $profiler->record(
+            new QueryExecuted("select * from users where email = 'literal-secret' and id = 0x2a", [], 1.0, $connection),
+            'users.index'
+        );
+
+        $request = new class
+        {
+            public function route(): object
+            {
+                return new class
+                {
+                    public function getName(): string
+                    {
+                        return 'users.index';
+                    }
+
+                    public function uri(): string
+                    {
+                        return 'users';
+                    }
+                };
+            }
+
+            public function method(): string
+            {
+                return 'GET';
+            }
+
+            public function server(string $key): float
+            {
+                return microtime(true) - 0.05;
+            }
+        };
+
+        $this->assertTrue($profiler->flush($request));
+        $profiles = $profiler->profiles();
+        $queryProfiles = array_values(array_filter($profiles, fn (array $profile): bool => $profile['type'] === 'query'));
+
+        $this->assertCount(1, $queryProfiles);
+        $this->assertSame('3', (string) $queryProfiles[0]['executions']);
+        $this->assertSame('1', (string) $queryProfiles[0]['requests']);
+        $this->assertEquals(41, (float) $queryProfiles[0]['total_ms']);
+        $this->assertStringNotContainsString('private@example.com', $queryProfiles[0]['query']);
+        $this->assertStringNotContainsString('literal-secret', $queryProfiles[0]['query']);
+        $this->assertStringContainsString('users.index', $queryProfiles[0]['route']);
+    }
 }
 
 class InMemoryRedisConnection implements RedisConnection
@@ -248,12 +321,31 @@ class InMemoryRedisConnection implements RedisConnection
 
     public int $getCalls = 0;
 
+    public array $hashes = [];
+
+    public array $sets = [];
+
     public function subscribe($channels, \Closure $callback): void {}
 
     public function psubscribe($channels, \Closure $callback): void {}
 
+    public function pipeline(?callable $callback = null): mixed
+    {
+        $pipeline = new InMemoryRedisPipeline($this);
+
+        if ($callback === null) {
+            return $pipeline;
+        }
+
+        $callback($pipeline);
+
+        return $pipeline->exec();
+    }
+
     public function command($method, array $parameters = []): mixed
     {
+        $method = strtolower($method);
+
         if ($method === 'get') {
             $this->getCalls++;
 
@@ -283,11 +375,81 @@ class InMemoryRedisConnection implements RedisConnection
             return true;
         }
 
+        if ($method === 'ping') {
+            return 'PONG';
+        }
+
+        if ($method === 'sadd') {
+            $this->sets[$parameters[0]][$parameters[1]] = true;
+
+            return 1;
+        }
+
+        if ($method === 'smembers') {
+            return array_keys($this->sets[$parameters[0]] ?? []);
+        }
+
+        if ($method === 'srem') {
+            unset($this->sets[$parameters[0]][$parameters[1]]);
+
+            return 1;
+        }
+
+        if ($method === 'expire') {
+            return true;
+        }
+
+        if ($method === 'hincrby') {
+            $this->hashes[$parameters[0]][$parameters[1]] =
+                (int) ($this->hashes[$parameters[0]][$parameters[1]] ?? 0) + (int) $parameters[2];
+
+            return $this->hashes[$parameters[0]][$parameters[1]];
+        }
+
+        if ($method === 'hincrbyfloat') {
+            $this->hashes[$parameters[0]][$parameters[1]] =
+                (float) ($this->hashes[$parameters[0]][$parameters[1]] ?? 0) + (float) $parameters[2];
+
+            return $this->hashes[$parameters[0]][$parameters[1]];
+        }
+
+        if ($method === 'hset') {
+            $this->hashes[$parameters[0]][$parameters[1]] = (string) $parameters[2];
+
+            return 1;
+        }
+
+        if ($method === 'hgetall') {
+            return $this->hashes[$parameters[0]] ?? [];
+        }
+
         return false;
     }
 
     public function __call(string $method, array $parameters): mixed
     {
         return $this->command($method, $parameters);
+    }
+}
+
+class InMemoryRedisPipeline
+{
+    protected array $commands = [];
+
+    public function __construct(protected InMemoryRedisConnection $redis) {}
+
+    public function __call(string $method, array $parameters): self
+    {
+        $this->commands[] = [$method, $parameters];
+
+        return $this;
+    }
+
+    public function exec(): array
+    {
+        return array_map(
+            fn (array $command): mixed => $this->redis->command($command[0], $command[1]),
+            $this->commands
+        );
     }
 }
